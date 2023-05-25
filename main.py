@@ -45,9 +45,10 @@ def hijack_progress(server):
     comfy.utils.set_progress_bar_global_hook(hook)
 
 def cleanup_temp():
-    temp_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp")
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir, ignore_errors=True)
+    print("someone called the clean temp function")
+#    temp_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp")
+#    if os.path.exists(temp_dir):
+#        shutil.rmtree(temp_dir, ignore_errors=True)
 
 def load_extra_path_config(yaml_path):
     with open(yaml_path, 'r') as stream:
