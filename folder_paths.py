@@ -1,4 +1,5 @@
 import os
+import time
 
 supported_ckpt_extensions = set(['.ckpt', '.pth', '.safetensors'])
 supported_pt_extensions = set(['.ckpt', '.pt', '.bin', '.pth', '.safetensors'])
@@ -17,6 +18,7 @@ folder_names_and_paths["clip_vision"] = ([os.path.join(models_dir, "clip_vision"
 folder_names_and_paths["style_models"] = ([os.path.join(models_dir, "style_models")], supported_pt_extensions)
 folder_names_and_paths["embeddings"] = ([os.path.join(models_dir, "embeddings")], supported_pt_extensions)
 folder_names_and_paths["diffusers"] = ([os.path.join(models_dir, "diffusers")], ["folder"])
+folder_names_and_paths["vae_approx"] = ([os.path.join(models_dir, "vae_approx")], supported_pt_extensions)
 
 folder_names_and_paths["controlnet"] = ([os.path.join(models_dir, "controlnet"), os.path.join(models_dir, "t2i_adapter")], supported_pt_extensions)
 folder_names_and_paths["gligen"] = ([os.path.join(models_dir, "gligen")], supported_pt_extensions)
@@ -154,7 +156,7 @@ def get_filename_list_(folder_name):
         output_list.update(filter_files_extensions(files, folders[1]))
         output_folders = {**output_folders, **folders_all}
 
-    return (sorted(list(output_list)), output_folders)
+    return (sorted(list(output_list)), output_folders, time.perf_counter())
 
 def cached_filename_list_(folder_name):
     global filename_list_cache
@@ -162,6 +164,8 @@ def cached_filename_list_(folder_name):
     if folder_name not in filename_list_cache:
         return None
     out = filename_list_cache[folder_name]
+    if time.perf_counter() < (out[2] + 0.5):
+        return out
     for x in out[1]:
         time_modified = out[1][x]
         folder = x
@@ -170,8 +174,9 @@ def cached_filename_list_(folder_name):
 
     folders = folder_names_and_paths[folder_name]
     for x in folders[0]:
-        if x not in out[1]:
-            return None
+        if os.path.isdir(x):
+            if x not in out[1]:
+                return None
 
     return out
 

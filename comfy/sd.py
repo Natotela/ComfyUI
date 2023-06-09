@@ -31,17 +31,6 @@ def load_model_weights(model, sd, verbose=False, load_state_dict_to=[]):
         if ids.dtype == torch.float32:
             sd['cond_stage_model.transformer.text_model.embeddings.position_ids'] = ids.round()
 
-    keys_to_replace = {
-        "cond_stage_model.model.positional_embedding": "cond_stage_model.transformer.text_model.embeddings.position_embedding.weight",
-        "cond_stage_model.model.token_embedding.weight": "cond_stage_model.transformer.text_model.embeddings.token_embedding.weight",
-        "cond_stage_model.model.ln_final.weight": "cond_stage_model.transformer.text_model.final_layer_norm.weight",
-        "cond_stage_model.model.ln_final.bias": "cond_stage_model.transformer.text_model.final_layer_norm.bias",
-    }
-
-    for x in keys_to_replace:
-        if x in sd:
-            sd[keys_to_replace[x]] = sd.pop(x)
-
     sd = utils.transformers_convert(sd, "cond_stage_model.model", "cond_stage_model.transformer.text_model", 24)
 
     for x in load_state_dict_to:
@@ -621,7 +610,7 @@ def broadcast_image_to(tensor, target_batch_size, batched_number):
         return torch.cat([tensor] * batched_number, dim=0)
 
 class ControlNet:
-    def __init__(self, control_model, device=None):
+    def __init__(self, control_model, global_average_pooling=False, device=None):
         self.control_model = control_model
         self.cond_hint_original = None
         self.cond_hint = None
@@ -630,6 +619,7 @@ class ControlNet:
             device = model_management.get_torch_device()
         self.device = device
         self.previous_controlnet = None
+        self.global_average_pooling = global_average_pooling
 
     def get_control(self, x_noisy, t, cond_txt, batched_number):
         control_prev = None
@@ -665,6 +655,9 @@ class ControlNet:
                 key = 'output'
                 index = i
             x = control[i]
+            if self.global_average_pooling:
+                x = torch.mean(x, dim=(2, 3), keepdim=True).repeat(1, 1, x.shape[2], x.shape[3])
+
             x *= self.strength
             if x.dtype != output_dtype and not autocast_enabled:
                 x = x.to(output_dtype)
@@ -695,7 +688,7 @@ class ControlNet:
             self.cond_hint = None
 
     def copy(self):
-        c = ControlNet(self.control_model)
+        c = ControlNet(self.control_model, global_average_pooling=self.global_average_pooling)
         c.cond_hint_original = self.cond_hint_original
         c.strength = self.strength
         return c
@@ -790,7 +783,11 @@ def load_controlnet(ckpt_path, model=None):
     if use_fp16:
         control_model = control_model.half()
 
-    control = ControlNet(control_model)
+    global_average_pooling = False
+    if ckpt_path.endswith("_shuffle.pth") or ckpt_path.endswith("_shuffle.safetensors") or ckpt_path.endswith("_shuffle_fp16.safetensors"): #TODO: smarter way of enabling global_average_pooling
+        global_average_pooling = True
+
+    control = ControlNet(control_model, global_average_pooling=global_average_pooling)
     return control
 
 class T2IAdapter:
@@ -1065,13 +1062,13 @@ def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, o
         "legacy": False
     }
 
-    if len(sd['model.diffusion_model.input_blocks.1.1.proj_in.weight'].shape) == 2:
+    if len(sd['model.diffusion_model.input_blocks.4.1.proj_in.weight'].shape) == 2:
         unet_config['use_linear_in_transformer'] = True
 
     unet_config["use_fp16"] = fp16
     unet_config["model_channels"] = sd['model.diffusion_model.input_blocks.0.0.weight'].shape[0]
     unet_config["in_channels"] = sd['model.diffusion_model.input_blocks.0.0.weight'].shape[1]
-    unet_config["context_dim"] = sd['model.diffusion_model.input_blocks.1.1.transformer_blocks.0.attn2.to_k.weight'].shape[1]
+    unet_config["context_dim"] = sd['model.diffusion_model.input_blocks.4.1.transformer_blocks.0.attn2.to_k.weight'].shape[1]
 
     sd_config["unet_config"] = {"target": "comfy.ldm.modules.diffusionmodules.openaimodel.UNetModel", "params": unet_config}
     model_config = {"target": "comfy.ldm.models.diffusion.ddpm.LatentDiffusion", "params": sd_config}
@@ -1089,10 +1086,10 @@ def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, o
     else:
         sd_config["conditioning_key"] = "crossattn"
 
-    if unet_config["context_dim"] == 1024:
-        unet_config["num_head_channels"] = 64 #SD2.x
-    else:
+    if unet_config["context_dim"] == 768:
         unet_config["num_heads"] = 8 #SD1.x
+    else:
+        unet_config["num_head_channels"] = 64 #SD2.x
 
     unclip = 'model.diffusion_model.label_emb.0.0.weight'
     if unclip in sd_keys:

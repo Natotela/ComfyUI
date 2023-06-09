@@ -24,6 +24,18 @@ def load_torch_file(ckpt, safe_load=False):
     return sd
 
 def transformers_convert(sd, prefix_from, prefix_to, number):
+    keys_to_replace = {
+        "{}.positional_embedding": "{}.embeddings.position_embedding.weight",
+        "{}.token_embedding.weight": "{}.embeddings.token_embedding.weight",
+        "{}.ln_final.weight": "{}.final_layer_norm.weight",
+        "{}.ln_final.bias": "{}.final_layer_norm.bias",
+    }
+
+    for k in keys_to_replace:
+        x = k.format(prefix_from)
+        if x in sd:
+            sd[keys_to_replace[k].format(prefix_to)] = sd.pop(x)
+
     resblock_to_replace = {
         "ln_1": "layer_norm1",
         "ln_2": "layer_norm2",
@@ -197,14 +209,14 @@ class ProgressBar:
         self.current = 0
         self.hook = PROGRESS_BAR_HOOK
 
-    def update_absolute(self, value, total=None):
+    def update_absolute(self, value, total=None, preview=None):
         if total is not None:
             self.total = total
         if value > self.total:
             value = self.total
         self.current = value
         if self.hook is not None:
-            self.hook(self.current, self.total)
+            self.hook(self.current, self.total, preview)
 
     def update(self, value):
         self.update_absolute(self.current + value)
