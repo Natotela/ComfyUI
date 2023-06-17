@@ -18,11 +18,9 @@ function hideWidget(node, widget, suffix = "") {
 		origProps[widget.name] = {
 			origType: widget.type,
 			origComputeSize: widget.computeSize,
-			origSerializeValue: widget.serializeValue,
 		}
 	}
-
-	widget.type = "hidden" + suffix;
+	widget.type = "ttNhidden" + suffix;
 	widget.computeSize = () => [0, -4]; // -4 is due to the gap litegraph adds between widgets automatically
 
 	if (widget.linkedWidgets) {
@@ -40,7 +38,6 @@ function showWidget(node, widget, suffix = "") {
 	
 	widget.type = origProps[widget.name].origType;
 	widget.computeSize = origProps[widget.name].origComputeSize;
-	widget.serializeValue = origProps[widget.name].origSerializeValue;
 	
 	if (widget.linkedWidgets) {
 		for (const w of widget.linkedWidgets) {
@@ -49,6 +46,8 @@ function showWidget(node, widget, suffix = "") {
 	}
 	node.setSize([node.size[0], Math.max(node.computeSize()[1], origSize[1])]);
 }
+
+const hrFixScaleWidgets = ['rescale_after_model', 'rescale', 'image_output']
 
 function hrFixScaleLogic(node, widget) {
 	if (widget.name === 'rescale_after_model') {
@@ -91,6 +90,8 @@ function hrFixScaleLogic(node, widget) {
 	}
 }
 
+const pipeLoaderWidgets = ['lora1_name', 'lora2_name', 'lora3_name']
+
 function pipeLoaderLogic(node, widget) {
 	if (widget.name === 'lora1_name') {
 		if (widget.value === "None") {
@@ -121,6 +122,8 @@ function pipeLoaderLogic(node, widget) {
 	}
 }
 
+const pipeKSamplerWidgets = ['lora_name', 'upscale_method', 'image_output']
+
 function pipeKSamplerLogic(node, widget) {
 	if (widget.name === 'lora_name') {
 		if (widget.value === "None") {
@@ -149,61 +152,120 @@ function pipeKSamplerLogic(node, widget) {
 	}
 }
 
+const imageRemBGWidgets = ['image_output']
+
+function imageRemBGLogic(node, widget) {
+	if (widget.name === 'image_output') {
+		if (widget.value === 'Hide' || widget.value === 'Preview') {
+			hideWidget(node, getWidgetByName(node, 'save_prefix'))
+		} else if (widget.value === 'Save' || widget.value === 'Hide/Save') {
+			showWidget(node, getWidgetByName(node, 'save_prefix'))
+		}
+	}
+}
+
+
 app.registerExtension({
 	name: "comfy.ttN.dynamicWidgets",
 	nodeCreated(node) {
 		if (node.getTitle() == "hiresfixScale") {
 			if (node.widgets)
 				for (const w of node.widgets) {
-					hrFixScaleLogic(node, w);
-					let widgetValue = w.value;
+					if (hrFixScaleWidgets.includes(w.name)) {
+						hrFixScaleLogic(node, w);
+						let widgetValue = w.value;
 
-					// Define getters and setters for widget values
-					Object.defineProperty(w, 'value', {
-						get() {
-							return widgetValue;
-						},
-						set(newVal) {
-							widgetValue = newVal;
-							hrFixScaleLogic(node, w);
-						}
-					});
+						// Define getters and setters for widget values
+						Object.defineProperty(w, 'value', {
+							get() {
+								return widgetValue;
+							},
+							set(newVal) {
+								widgetValue = newVal;
+								hrFixScaleLogic(node, w);
+							}
+						});
+					}
 				}
 		}
 		if (node.getTitle() == "pipeLoader") {
 			if (node.widgets)
 				for (const w of node.widgets) {
-					pipeLoaderLogic(node, w);
-					let widgetValue = w.value;
+					if (pipeLoaderWidgets.includes(w.name)) {
+						pipeLoaderLogic(node, w);
+						let widgetValue = w.value;
 
-					// Define getters and setters for widget values
-					Object.defineProperty(w, 'value', {
-						get() {
-							return widgetValue;
-						},
-						set(newVal) {
-							widgetValue = newVal;
-							pipeLoaderLogic(node, w);
-						}
-					});
+						// Define getters and setters for widget values
+						Object.defineProperty(w, 'value', {
+							get() {
+								return widgetValue;
+							},
+							set(newVal) {
+								widgetValue = newVal;
+								pipeLoaderLogic(node, w);
+							}
+						});
+					}
 				}
 		}
 		if (node.getTitle() == "pipeKSampler") {
 			if (node.widgets)
 				for (const w of node.widgets) {
-					pipeKSamplerLogic(node, w);
-					let widgetValue = w.value;
+					if (pipeKSamplerWidgets.includes(w.name)) {
+						pipeKSamplerLogic(node, w);
+						let widgetValue = w.value;
 
-					// Define getters and setters for widget values
-					Object.defineProperty(w, 'value', {
-						get() {
-							return widgetValue;
-						},
-						set(newVal) {
-							widgetValue = newVal;
-							pipeKSamplerLogic(node, w);
-						}
-					});
+						// Define getters and setters for widget values
+						Object.defineProperty(w, 'value', {
+							get() {
+								return widgetValue;
+							},
+							set(newVal) {
+								widgetValue = newVal;
+								pipeKSamplerLogic(node, w);
+							}
+						});
+					}
+				}
+		}
+		if (node.getTitle() == "imageRemBG") {
+			if (node.widgets)
+				for (const w of node.widgets) {
+					if (imageRemBGWidgets.includes(w.name)) {
+						imageRemBGLogic(node, w);
+						let widgetValue = w.value;
+
+						// Define getters and setters for widget values
+						Object.defineProperty(w, 'value', {
+							get() {
+								return widgetValue;
+							},
+							set(newVal) {
+								widgetValue = newVal;
+								imageRemBGLogic(node, w);
+							}
+						});
+					}
+				}
+		}
+		if (node.getTitle() == "imageOutput") {
+			if (node.widgets)
+				for (const w of node.widgets) {
+					if (imageRemBGWidgets.includes(w.name)) {
+						imageRemBGLogic(node, w);
+						let widgetValue = w.value;
+
+						// Define getters and setters for widget values
+						Object.defineProperty(w, 'value', {
+							get() {
+								return widgetValue;
+							},
+							set(newVal) {
+								widgetValue = newVal;
+								imageRemBGLogic(node, w);
+							}
+						});
+					}
 				}
 		}
 	}
