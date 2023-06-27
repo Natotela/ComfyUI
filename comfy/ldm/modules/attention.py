@@ -12,8 +12,6 @@ from .sub_quadratic_attention import efficient_dot_product_attention
 from comfy import model_management
 import comfy.ops
 
-from . import tomesd
-
 if model_management.xformers_enabled():
     import xformers
     import xformers.ops
@@ -519,18 +517,38 @@ class BasicTransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(dim, dtype=dtype)
         self.norm3 = nn.LayerNorm(dim, dtype=dtype)
         self.checkpoint = checkpoint
+        self.n_heads = n_heads
+        self.d_head = d_head
 
     def forward(self, x, context=None, transformer_options={}):
         return checkpoint(self._forward, (x, context, transformer_options), self.parameters(), self.checkpoint)
 
     def _forward(self, x, context=None, transformer_options={}):
-        current_index = None
+        extra_options = {}
+        block = None
+        block_index = 0
         if "current_index" in transformer_options:
-            current_index = transformer_options["current_index"]
+            extra_options["transformer_index"] = transformer_options["current_index"]
+        if "block_index" in transformer_options:
+            block_index = transformer_options["block_index"]
+            extra_options["block_index"] = block_index
+        if "original_shape" in transformer_options:
+            extra_options["original_shape"] = transformer_options["original_shape"]
+        if "block" in transformer_options:
+            block = transformer_options["block"]
+            extra_options["block"] = block
         if "patches" in transformer_options:
             transformer_patches = transformer_options["patches"]
         else:
             transformer_patches = {}
+
+        extra_options["n_heads"] = self.n_heads
+        extra_options["dim_head"] = self.d_head
+
+        if "patches_replace" in transformer_options:
+            transformer_patches_replace = transformer_options["patches_replace"]
+        else:
+            transformer_patches_replace = {}
 
         n = self.norm1(x)
         if self.disable_self_attn:
@@ -545,19 +563,39 @@ class BasicTransformerBlock(nn.Module):
                 context_attn1 = n
             value_attn1 = context_attn1
             for p in patch:
-                n, context_attn1, value_attn1 = p(current_index, n, context_attn1, value_attn1)
+                n, context_attn1, value_attn1 = p(n, context_attn1, value_attn1, extra_options)
 
-        if "tomesd" in transformer_options:
-            m, u = tomesd.get_functions(x, transformer_options["tomesd"]["ratio"], transformer_options["original_shape"])
-            n = u(self.attn1(m(n), context=context_attn1, value=value_attn1))
+        if block is not None:
+            transformer_block = (block[0], block[1], block_index)
+        else:
+            transformer_block = None
+        attn1_replace_patch = transformer_patches_replace.get("attn1", {})
+        block_attn1 = transformer_block
+        if block_attn1 not in attn1_replace_patch:
+            block_attn1 = block
+
+        if block_attn1 in attn1_replace_patch:
+            if context_attn1 is None:
+                context_attn1 = n
+                value_attn1 = n
+            n = self.attn1.to_q(n)
+            context_attn1 = self.attn1.to_k(context_attn1)
+            value_attn1 = self.attn1.to_v(value_attn1)
+            n = attn1_replace_patch[block_attn1](n, context_attn1, value_attn1, extra_options)
+            n = self.attn1.to_out(n)
         else:
             n = self.attn1(n, context=context_attn1, value=value_attn1)
+
+        if "attn1_output_patch" in transformer_patches:
+            patch = transformer_patches["attn1_output_patch"]
+            for p in patch:
+                n = p(n, extra_options)
 
         x += n
         if "middle_patch" in transformer_patches:
             patch = transformer_patches["middle_patch"]
             for p in patch:
-                x = p(current_index, x)
+                x = p(x, extra_options)
 
         n = self.norm2(x)
 
@@ -567,9 +605,28 @@ class BasicTransformerBlock(nn.Module):
             patch = transformer_patches["attn2_patch"]
             value_attn2 = context_attn2
             for p in patch:
-                n, context_attn2, value_attn2 = p(current_index, n, context_attn2, value_attn2)
+                n, context_attn2, value_attn2 = p(n, context_attn2, value_attn2, extra_options)
 
-        n = self.attn2(n, context=context_attn2, value=value_attn2)
+        attn2_replace_patch = transformer_patches_replace.get("attn2", {})
+        block_attn2 = transformer_block
+        if block_attn2 not in attn2_replace_patch:
+            block_attn2 = block
+
+        if block_attn2 in attn2_replace_patch:
+            if value_attn2 is None:
+                value_attn2 = context_attn2
+            n = self.attn2.to_q(n)
+            context_attn2 = self.attn2.to_k(context_attn2)
+            value_attn2 = self.attn2.to_v(value_attn2)
+            n = attn2_replace_patch[block_attn2](n, context_attn2, value_attn2, extra_options)
+            n = self.attn2.to_out(n)
+        else:
+            n = self.attn2(n, context=context_attn2, value=value_attn2)
+
+        if "attn2_output_patch" in transformer_patches:
+            patch = transformer_patches["attn2_output_patch"]
+            for p in patch:
+                n = p(n, extra_options)
 
         x += n
         x = self.ff(self.norm3(x)) + x
@@ -591,7 +648,7 @@ class SpatialTransformer(nn.Module):
                  use_checkpoint=True, dtype=None):
         super().__init__()
         if exists(context_dim) and not isinstance(context_dim, list):
-            context_dim = [context_dim]
+            context_dim = [context_dim] * depth
         self.in_channels = in_channels
         inner_dim = n_heads * d_head
         self.norm = Normalize(in_channels, dtype=dtype)
@@ -621,7 +678,7 @@ class SpatialTransformer(nn.Module):
     def forward(self, x, context=None, transformer_options={}):
         # note: if no context is given, cross-attention defaults to self-attention
         if not isinstance(context, list):
-            context = [context]
+            context = [context] * len(self.transformer_blocks)
         b, c, h, w = x.shape
         x_in = x
         x = self.norm(x)
@@ -631,6 +688,7 @@ class SpatialTransformer(nn.Module):
         if self.use_linear:
             x = self.proj_in(x)
         for i, block in enumerate(self.transformer_blocks):
+            transformer_options["block_index"] = i
             x = block(x, context=context[i], transformer_options=transformer_options)
         if self.use_linear:
             x = self.proj_out(x)
