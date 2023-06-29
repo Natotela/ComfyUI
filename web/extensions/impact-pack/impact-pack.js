@@ -104,7 +104,28 @@ function imgSendHandler(event) {
 		for(let i in nodes) {
 			if(nodes[i].type == 'ImageReceiver') {
 				if(nodes[i].widgets[1].value == event.detail.link_id) {
-					nodes[i].widgets[0].value = filename;
+					nodes[i].widgets[0].value = `${data.subfolder}/${data.filename} [${data.type}]`;
+					let img = new Image();
+					img.src = `/view?filename=${data.filename}&type=${data.type}&subfolder=${data.subfolder}`+app.getPreviewFormatParam();
+					nodes[i].imgs = [img];
+					nodes[i].size[1] = Math.max(200, nodes[i].size[1]);
+				}
+			}
+		}
+	}
+}
+
+
+function latentSendHandler(event) {
+	if(event.detail.images.length > 0){
+		let data = event.detail.images[0];
+		let filename = `${data.filename} [${data.type}]`;
+
+		let nodes = app.graph._nodes;
+		for(let i in nodes) {
+			if(nodes[i].type == 'LatentReceiver') {
+				if(nodes[i].widgets[1].value == event.detail.link_id) {
+					nodes[i].widgets[0].value = `${data.subfolder}/${data.filename} [${data.type}]`;
 					let img = new Image();
 					img.src = `/view?filename=${data.filename}&type=${data.type}&subfolder=${data.subfolder}`+app.getPreviewFormatParam();
 					nodes[i].imgs = [img];
@@ -117,6 +138,7 @@ function imgSendHandler(event) {
 
 var progressEventRegistered = false;
 var imgSendEventRegistered = false;
+var latentSendEventRegistered = false;
 const impactProgressBadge = new ImpactProgressBadge();
 
 app.registerExtension({
@@ -137,6 +159,13 @@ app.registerExtension({
 				imgSendEventRegistered = true;
 			}
 		}
+
+		if (node.comfyClass == "LatentSender") {
+			if (!latentSendEventRegistered) {
+				api.addEventListener("latent-send", latentSendHandler);
+				latentSendEventRegistered = true;
+			}
+		}
 	},
 
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
@@ -155,6 +184,10 @@ app.registerExtension({
 		}
 
 		if(node.comfyClass == "ImpactWildcardProcessor") {
+			node.widgets[0].inputEl.placeholder = "Wildcard Prompt (User input)";
+			node.widgets[1].inputEl.placeholder = "Populated Prompt (Will be generated automatically)";
+			node.widgets[1].inputEl.disabled = true;
+
 			let force_serializeValue = async (n,i) =>
 				{
 					if(n.widgets_values[2] == "Fixed") {
@@ -177,15 +210,29 @@ app.registerExtension({
 					}
 				};
 
+			//
+			Object.defineProperty(node.widgets[2], "value", {
+				set: (value) => {
+						this._value = value;
+						node.widgets[1].inputEl.disabled = value != "Fixed";
+					},
+				get: () => {
+						if(this._value)
+							return this._value;
+						else
+							return "Populate";
+					 }
+			});
+
 			// prevent hooking by dynamicPrompt.js
 			Object.defineProperty(node.widgets[0], "serializeValue", {
 				set: () => {},
-				get: (value) => { return (n,i) => { return n.widgets_values[i]; }; }
+				get: () => { return (n,i) => { return n.widgets_values[i]; }; }
 			});
 
 			Object.defineProperty(node.widgets[1], "serializeValue", {
 				set: () => {},
-				get: (value) => { return force_serializeValue; }
+				get: () => { return force_serializeValue; }
 			});
 		}
 
