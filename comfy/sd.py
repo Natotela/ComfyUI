@@ -89,8 +89,7 @@ LORA_UNET_MAP_RESNET = {
     "skip_connection": "resnets_{}_conv_shortcut"
 }
 
-def load_lora(path, to_load):
-    lora = utils.load_torch_file(path, safe_load=True)
+def load_lora(lora, to_load):
     patch_dict = {}
     loaded_keys = set()
     for x in to_load:
@@ -501,10 +500,10 @@ class ModelPatcher:
 
         self.backup = {}
 
-def load_lora_for_models(model, clip, lora_path, strength_model, strength_clip):
+def load_lora_for_models(model, clip, lora, strength_model, strength_clip):
     key_map = model_lora_keys(model.model)
     key_map = model_lora_keys(clip.cond_stage_model, key_map)
-    loaded = load_lora(lora_path, key_map)
+    loaded = load_lora(lora, key_map)
     new_modelpatcher = model.clone()
     k = new_modelpatcher.add_patches(loaded, strength_model)
     new_clip = clip.clone()
@@ -1142,6 +1141,7 @@ def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, o
             clipvision = clip_vision.load_clipvision_from_sd(sd, model_config.clip_vision_prefix, True)
 
     model = model_config.get_model(sd)
+    model = model.to(model_management.unet_offload_device())
     model.load_model_weights(sd, "model.diffusion_model.")
 
     if output_vae:
